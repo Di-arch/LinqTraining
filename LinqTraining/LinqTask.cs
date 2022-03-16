@@ -9,6 +9,11 @@ namespace LinqTraining
     {
         public static IEnumerable<Customer> Linq1(IEnumerable<Customer> customers, decimal limit)
         {
+            if (customers is null)
+            {
+                throw new ArgumentNullException(nameof(customers));
+            }
+
             var result = customers.Where(customer => customer.Orders.Sum(order => order.Total) > limit);
             return result;
         }
@@ -28,11 +33,7 @@ namespace LinqTraining
                 throw new ArgumentNullException(nameof(suppliers));
             }
 
-            var result = new List<(Customer, IEnumerable<Supplier>)>();
-            foreach (var customer in customers)
-            {
-                result.Add((customer, suppliers.Where(x => x.Country == customer.Country && x.City == customer.City)));
-            }
+            var result = customers.Select(customer => (customer, suppliers.Where(supplier => supplier.City == customer.City && supplier.Country == customer.Country))).ToList();
             return result;
         }
 
@@ -51,23 +52,7 @@ namespace LinqTraining
                 throw new ArgumentNullException(nameof(suppliers));
             }
 
-            var query = from customer in customers
-                        from supplier in suppliers
-                        group suppliers by customer into customerSuppliers
-                        select new
-                        {
-                            Customer = customerSuppliers.Key,
-                            Suppliers = from suppliers in customerSuppliers
-                                        from supplier in suppliers
-                                        where supplier.Country == customerSuppliers.Key.Country && supplier.City == customerSuppliers.Key.City
-                                        select supplier
-                        }; 
-
-            var result = new List<(Customer, IEnumerable<Supplier>)>();
-            foreach (var item in query)
-            {
-                result.Add((item.Customer, item.Suppliers));
-            }
+            var result = customers.Select(customer => (customer, suppliers.Where(supplier => supplier.City == customer.City && supplier.Country == customer.Country))).ToList();
             return result;
         }
 
@@ -78,8 +63,8 @@ namespace LinqTraining
                 throw new ArgumentNullException(nameof(customers));
             }
 
-            var query = customers.Where(customer=>customer.Orders.Any(order=>order.Total>limit)).ToList();
-            return query;
+            var result = customers.Where(customer=>customer.Orders.Any(order=>order.Total>limit)).ToList();
+            return result;
         }
 
         public static IEnumerable<(Customer customer, DateTime dateOfEntry)> Linq4(
@@ -91,23 +76,7 @@ namespace LinqTraining
                 throw new ArgumentNullException(nameof(customers));
             }
 
-            var result = new List<(Customer, DateTime)>();
-
-            var query = from customer in customers
-                         where customer.Orders.Count() > 0
-                         group customer.Orders by customer into customerOrders
-                         select new
-                         {
-                             Customer = customerOrders.Key,
-                             DateOfEntry = (from ordersArr in customerOrders
-                                           from order in ordersArr
-                                           select order.OrderDate).ToArray().Min()                                                                                     
-                         };
-
-            foreach (var item in query)
-            {
-                result.Add((item.Customer, item.DateOfEntry));
-            }
+            var result = customers.Where(customer => customer.Orders.Count() > 0).Select(customer => (customer, customer.Orders.Select(order => order.OrderDate).Min()));
             return result;
         }
 
@@ -120,25 +89,7 @@ namespace LinqTraining
                 throw new ArgumentNullException(nameof(customers));
             }
 
-            var result = new List<(Customer, DateTime)>();
-
-            var query = from customer in customers
-                        where customer.Orders.Count() > 0
-                        from order in customer.Orders
-                        orderby order.OrderDate.Year, order.OrderDate.Month, customer.Orders.Sum(o => o.Total) descending, customer.CompanyName
-                        group customer.Orders by customer into customerOrders
-                        select new
-                        {
-                            Customer = customerOrders.Key,
-                            DateOfEntry = (from orders in customerOrders
-                                           from order in orders
-                                           select order.OrderDate).ToArray().Min()
-                        };
-
-            foreach (var item in query)
-            {
-                result.Add((item.Customer, item.DateOfEntry));
-            }
+            var result = customers.Where(customer => customer.Orders.Count() > 0).Select(customer => (customer, customer.Orders.Select(order => order.OrderDate).Min())).OrderBy(customer=>customer.Item2.Year).ThenBy(customer=>customer.Item2.Month).ThenByDescending(customer=>customer.customer.Orders.Sum(order=>order.Total)).ThenBy(customer=>customer.customer.CompanyName);
             return result;
         }
 
@@ -148,23 +99,9 @@ namespace LinqTraining
             {
                 throw new ArgumentNullException(nameof(customers));
             }
-            
-            bool GetValidation(string postalCode,string region, string phone)
-            {
-                int parseResult;
-                if(int.TryParse(postalCode,out parseResult) &&
-                   !string.IsNullOrWhiteSpace(region) &&
-                   phone.StartsWith('('))
-                {
-                    return false;
-                }
-                return true;
-            }
-            
-            var result = from customer in customers
-                         where  GetValidation(customer.PostalCode,customer.Region,customer.Phone) 
-                         select customer;
 
+            int parseResult;
+            var result = customers.Where(customer => !customer.Phone.StartsWith('(') || !int.TryParse(customer.PostalCode,out parseResult) || string.IsNullOrWhiteSpace(customer.Region)).ToList();
             return result;
         }
 
@@ -175,23 +112,17 @@ namespace LinqTraining
                 throw new ArgumentNullException(nameof(products));
             }
 
-            var query = from product in products
-                        group product by product.Category
-                        into categoryProduct
-                        select new Linq7CategoryGroup()
-                        {
-                            Category = categoryProduct.Key,
-                            UnitsInStockGroup = from cat in categoryProduct
-                                                orderby cat.UnitsInStock descending
-                                                group cat.UnitPrice by cat.UnitsInStock
-                                                into catProduct
-                                                select new Linq7UnitsInStockGroup()
-                                                {
-                                                    UnitsInStock = catProduct.Key,
-                                                    Prices = catProduct
-                                                }
-                        };
-            return query;   
+            var result = products.GroupBy(product => product.Category).
+                Select(categoryGroup => new Linq7CategoryGroup()
+                {
+                    Category = categoryGroup.Key,
+                    UnitsInStockGroup = categoryGroup.
+                    OrderByDescending(group => group.UnitsInStock).
+                    GroupBy(u => u.UnitsInStock, p => p.UnitPrice).
+                    Select(x => new Linq7UnitsInStockGroup() { UnitsInStock = x.Key, Prices = x })
+                });
+            return result;
+
         }
 
         public static IEnumerable<(decimal category, IEnumerable<Product> products)> Linq8(
@@ -207,7 +138,6 @@ namespace LinqTraining
             }
 
             var result = new List<(decimal, IEnumerable<Product>)>();
-
             var cheapProducts = products.Where(product => product.UnitPrice <= cheap);
             result.Add((cheap, cheapProducts));
 
@@ -227,25 +157,9 @@ namespace LinqTraining
             {
                 throw new ArgumentNullException(nameof(customers));
             }
-            var result = new List<(string, int, int)>();
-            var query = from customer in customers
-                        group customer.Orders by customer.City into countryOrders
-                        select new
-                        {
-                            City = countryOrders.Key,
-                            AvaregeIncome = (int)Math.Round((from customer in customers
-                                                  where customer.City == countryOrders.Key
-                                                  select customer.Orders.Sum(x => x.Total)).Average()),
-                            AvaregeEntensity = (int)(from customer in customers
-                                                     where customer.City == countryOrders.Key
-                                                     select customer.Orders.Count()).Average()
 
-                        };
-            foreach (var item in query)
-            {
-                result.Add((item.City, item.AvaregeIncome, item.AvaregeEntensity));
-            }
-            return result;
+            var result2 = customers.GroupBy(customer => customer.City, customer => customer.Orders).Select(grouping => (grouping.Key,(int)Math.Round(customers.Where(customer=>customer.City==grouping.Key).Select(customer=>customer.Orders.Sum(sum=>sum.Total)).Average()), (int)customers.Where(customer => customer.City == grouping.Key).Select(customer=>customer.Orders.Count()).Average())); 
+            return result2;
             
         }
 
@@ -256,9 +170,7 @@ namespace LinqTraining
                 throw new ArgumentNullException(nameof(suppliers));
             }
 
-            string result = string.Concat((from supplier in suppliers
-                                           orderby supplier.Country.Length, supplier.Country.Substring(0, 1)
-                                           select supplier.Country).Distinct());
+            string result = string.Concat((suppliers.OrderBy(supplier => supplier.Country.Length).ThenBy(supplier => supplier.Country.Substring(0, 1)).Select(supplier => supplier.Country).Distinct()));
             return result;
         }
     }
